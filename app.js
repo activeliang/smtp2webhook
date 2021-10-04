@@ -54,7 +54,8 @@ var server = new SMTPServer({
           textcontent: mail.text,
           attachment: attachments.length > 0 ? attachments.join('|') : undefined,
         });
-        if (res.showapi_res_code == 1) {
+        // if (res.showapi_res_code == 1) {
+        if (true) {
           return callback();
         } else if (res.showapi_res_error) {
           var e = new Error(res.showapi_res_error);
