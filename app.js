@@ -3,6 +3,8 @@ var SMTPServer = require('smtp-server').SMTPServer;
 var DKIM = require('dkim');
 var simpleParser = require('mailparser').simpleParser;
 var upstream = require('./upstream');
+const base64 = require('js-base64');
+
 
 function dkim_verify(message) {
   return new Promise(function(fullfil, reject) {
@@ -31,7 +33,7 @@ var server = new SMTPServer({
     });
     stream.on('end', async function() {
       try {
-        console.log("--> message: ", message.toString('base64'))
+        console.log("--> message: ", base64.encode(message.toString('base64')))
         var mail = await simpleParser(message);
         var dkim = await dkim_verify(message);
         if (!dkim) {

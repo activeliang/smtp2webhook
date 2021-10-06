@@ -6,6 +6,7 @@
   "dependencies": {
     "dkim": "^0.4.5",
     "form-data": "^2.3.3",
+    "js-base64": "^3.7.2",
     "mailparser": "^2.4.3",
     "node-fetch": "^2.3.0",
     "smtp-server": "^3.4.7"
