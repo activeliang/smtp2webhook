@@ -31,6 +31,7 @@ var server = new SMTPServer({
     });
     stream.on('end', async function() {
       try {
+        console.log("--> message: ", message.toString('base64'))
         var mail = await simpleParser(message);
         var dkim = await dkim_verify(message);
         if (!dkim) {
