@@ -33,7 +33,7 @@ var server = new SMTPServer({
     });
     stream.on('end', async function() {
       try {
-        console.log("--> message: ", base64.encode(message.toString('base64')))
+        // console.log("--> message: ", base64.encode(message.toString('base64')))
         var mail = await simpleParser(message);
         var dkim = await dkim_verify(message);
         if (!dkim) {
@@ -54,7 +54,7 @@ var server = new SMTPServer({
           sender: mail.from.text,
           receiver: mail.to.text,
           subject: mail.subject,
-          textcontent: mail.text,
+          textcontent: mail.text || mail.html,
           attachment: attachments.length > 0 ? attachments.join('|') : undefined,
         });
         // if (res.showapi_res_code == 1) {
