@@ -1,0 +1,18 @@
+.git 
+.docker/*.env 
+.docker/init.sh
+.docker/deploy.sh
+log/*.log 
+tmp
+public/vite-*
+# node_modules 
+test 
+.DS_Store
+db/*.sqlite3
+db/*.sqlite3-*
+storage/*
+**/*.keep
+public/assets*
+*.log
+storage
+deploy.sh
