@@ -16,27 +16,15 @@ const main = {
     }
     form.append('data', new Date().toISOString());
     if (config.debug) console.log(form);
-    var res = await axios.post(config.upstream, form, {
+    // 失败直接抛异常，由调用方（app.js）捕获并收集到错误列表
+    const res = await axios.post(config.upstream, form, {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       timeout: 8000 // 8 seconds in milliseconds
-    }).then(r => r.data).catch(err => {
-      console.info('backend server error: ', err.code);
-      return err.code;
     });
-    console.info(`send_to_backgend res: ${JSON.stringify(res)}`)
-    log(`send_to_backgend res: ${JSON.stringify(res)}`)
-    return res;
+    console.info(`send_to_backgend res: ${JSON.stringify(res.data)}`)
+    log(`send_to_backgend res: ${JSON.stringify(res.data)}`)
+    return res.data;
   }
 }
 
 module.exports = main
-
-/*
-exports.send({
-  ak: "e8562670b6c840688f34044309b0fdd0",
-  sender: "pjincz@gmail.com",
-  receiver: "test@jcz.onl",
-  subject: "test+mail",
-  textcontent: "awef awef awef",
-}).then(console.log);
-*/

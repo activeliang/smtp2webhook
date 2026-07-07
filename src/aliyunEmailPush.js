@@ -1,12 +1,10 @@
 var nodemailer = require('nodemailer')
 var axios = require('axios')
 const uploader = require('./uploader')
-const notify = require('./notify')
 
 var transporter = nodemailer.createTransport({
   "host": "smtpdm.aliyun.com",
   "port": 80,
-  // "secureConnection": true, // use SSL, the port is 465
   "auth": {
     "user": 'transfer@limx.hupan.cafe', // user name
     "pass": 'EssvanQin123'         // password
@@ -16,20 +14,16 @@ var transporter = nodemailer.createTransport({
 var transporter2 = nodemailer.createTransport({
   host: 'smtp.163.com',
   port: 465,
-  // "secureConnection": true, // use SSL, the port is 465
   "auth": {
     "user": 'limxas@163.com', // user name
     "pass": 'MULFSTBNOFMBMYFZ'         // password
   }
 })
-// NB! No need to recreate the transporter object. You can use
-// the same transporter object for all e-mails
-// setup e-mail data with unicode symbols
 
 const emailRegex = /[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+/
 
 const getEmailValidInfo = name => {
-  return axios.get(`https://gg.hongliang.fun/api/v1/email_valid?name=${name}`).then(res => res.data)
+  return axios.get(`https://gg.hongliang.fun/api/v1/email_valid?name=${name}`, { timeout: 10000 }).then(res => res.data)
 }
 
 const main = {
@@ -42,7 +36,7 @@ const main = {
       return;
     }
     const validInfo = await getEmailValidInfo(sender.split('-')[0])
-    if (!validInfo.valid) return
+    if (!validInfo || !validInfo.valid) return
     const senderName = mail.from.text.replace(/<[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+>/, '')
     var mailOptions = {
       from: `[${mail.to.text.match(emailRegex)[0].split('@')[0]}] ${senderName} <transfer@limx.hupan.cafe>`, // sender address mailfrom must be same with the user
@@ -66,25 +60,22 @@ const main = {
     }
 
     let result
-    result = await transporter.sendMail(mailOptions).then(d => {
-      console.info('发送结果: ', d)
-      if (d.rejected.length == 0 && d.response.startsWith(`250 Data Ok`)) {
-        return d
+    try {
+      result = await transporter.sendMail(mailOptions)
+      if (result.rejected.length == 0 && result.response.startsWith(`250 Data Ok`)) {
+        console.info('发送结果: ', result)
       } else {
-        notify.push(`阿里云邮件推送失败: ${JSON.stringify(d)}`)
-        console.info(`发送失败，准备重发: ${JSON.stringify(d)}`)
-        throw new Error(`response status code is not 250...`)
+        throw new Error(`response status code is not 250: ${result.response}`)
       }
-    }).catch(async err => {
-      console.info('发送失败: ', err)
-      result = await transporter2.sendMail(mailOptions).then(d2 => {
-        console.info('发送结果2: ', d2)
-        return d2
-      }).catch(err2 => {
-        console.info('发送失败2: ', err2)
-      })
-      notify.push(`阿里云邮件推送失败: err: ${err.message || err}`)
-    })
+    } catch (err) {
+      console.info('主发送失败，尝试备用: ', err.message)
+      try {
+        result = await transporter2.sendMail(mailOptions)
+        console.info('备用发送结果: ', result)
+      } catch (err2) {
+        throw new Error(`阿里云/163 邮件发送均失败: ${err2.message || err2}`)
+      }
+    }
     return result
   }
 }

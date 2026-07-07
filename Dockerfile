@@ -1,4 +1,4 @@
-FROM node:16.18-alpine3.15
+FROM node:18-alpine
 
 RUN set -eux & apk add --no-cache yarn
 WORKDIR /app

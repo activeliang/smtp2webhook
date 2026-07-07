@@ -13,9 +13,10 @@ const fs = require('fs-extra');
 
 // 按字节截断字符串
 function cutByByte(str, maxBytes) {
+  if (!str) return '';
   const buf = Buffer.from(str);
   if (buf.length <= maxBytes) return str;
-  const cut = buf.slice(0, maxBytes);
+  let cut = buf.slice(0, maxBytes);
   // 避免截断到半个 UTF-8 字符
   while (cut.length > 0 && (cut[cut.length - 1] & 0x80) === 0x80) {
     // 如果最后一个字节是 UTF-8 多字节字符的一部分，往前截
@@ -47,39 +48,39 @@ const serverParams = {
       }
       try {
         var mail = await simpleParser(message);
-        if (!mail.to) {
-          console.info(`没有mail.to...忽略邮件`);
-          log(JSON.stringify({ err: 'no_mail_to', from: mail.from ? mail.from.text : 'unknown' }));
-          return callback();
+        const errors = [];
+        const safeFrom = mail.from ? mail.from.text : 'unknown';
+        const safeTo = mail.to ? mail.to.text : 'unknown';
+
+        if (!mail.to || !mail.from) {
+          const msg = `邮件缺少收件人/发件人，from=${safeFrom}, to=${safeTo}`;
+          console.info(msg);
+          errors.push({ step: 'parse', msg });
         }
-        const mailId = `${Date.now()}--${cutByByte(mail.to.text, 60)}--${cutByByte(mail.subject, 100)}`
-        // 记录日志到本地
+
+        const mailId = `${Date.now()}--${cutByByte(safeTo, 60)}--${cutByByte(mail.subject, 100)}`;
+
+        // 1. 优先缓存到本地（记录日志 + 保存内容/附件）
         try {
           log(JSON.stringify({
             ak: config.ak,
             remote_ip: session.remoteAddress,
             remote_host: session.clientHostname,
             headers: mail.headers,
-            sender: mail.from.text,
-            receiver: mail.to.text,
+            sender: safeFrom,
+            receiver: safeTo,
             subject: mail.subject,
             mail_id: mailId
-          }))
-        } catch (err) {
-          console.info(`记录日志出错: `, err)
-        }
-
-        // 缓存附件和内容到本地文件夹
-        try {
+          }));
           const mailDir = path.join(__dirname, '..', 'logs', 'emails');
           const mailPath = path.join(mailDir, mailId);
           await fs.ensureDir(mailPath);
 
           // 保存HTML内容
           if (mail.html) {
-            await fs.writeFile(path.join(mailPath, 'content.html'), mail.html).catch(err => { throw err; });
+            await fs.writeFile(path.join(mailPath, 'content.html'), mail.html);
           } else if (mail.text) {
-            await fs.writeFile(path.join(mailPath, 'content.html'), mail.text).catch(err => { throw err; });
+            await fs.writeFile(path.join(mailPath, 'content.html'), mail.text);
           }
 
           // 保存附件
@@ -88,46 +89,65 @@ const serverParams = {
               let filename = attachment.filename || 'attachment';
               filename = cutByByte(filename, 100);
               const attachmentPath = path.join(mailPath, filename);
-              await fs.writeFile(attachmentPath, attachment.content).catch(writeErr => {
+              try {
+                await fs.writeFile(attachmentPath, attachment.content);
+              } catch (writeErr) {
                 console.info(`保存附件失败: ${writeErr}`);
-              });
+              }
             }
           }
         } catch (err) {
-          console.info('缓存本地出错', err)
+          console.error('缓存本地出错', err);
+          errors.push({ step: 'cache', msg: err.message || String(err) });
         }
 
-        // 转发邮件到相关位置
+        const commonFields = () => ({
+          ak: config.ak,
+          remote_ip: session.remoteAddress,
+          remote_host: session.clientHostname,
+          headers: mail.headers,
+          sender: safeFrom,
+          receiver: safeTo,
+          subject: mail.subject,
+          content: mail.html
+        });
+
+        // 2. 发往中心后台
         try {
-          await transfer(mail).catch(err => console.info(`转发邮件出错: `, err))
+          await upstream.send(commonFields());
         } catch (err) {
-          console.info(`转发邮件出错: `, err)
+          console.error('发往中心后台出错', err);
+          errors.push({ step: 'upstream', msg: err.message || String(err) });
         }
 
-        // 上传到网站记录
-        try {
-          await upstream.send({
-            ak: config.ak,
-            remote_ip: session.remoteAddress,
-            remote_host: session.clientHostname,
-            headers: mail.headers,
-            sender: mail.from.text,
-            receiver: mail.to.text,
-            subject: mail.subject,
-            content: mail.html
-          }).catch(err => console.info('upstream error: ', err))
-        } catch (err) {
-          console.info(`上传到后台出错`, err)
+        // 3. 查询规则并转发（需要 from/to 都存在）
+        if (mail.to && mail.from) {
+          try {
+            const transferErrors = await transfer(mail);
+            if (Array.isArray(transferErrors)) {
+              transferErrors.forEach(e => errors.push(e));
+            }
+          } catch (err) {
+            console.error('转发处理出错', err);
+            errors.push({ step: 'transfer', msg: err.message || String(err) });
+          }
         }
-        return callback()
+
+        // 4. 出错发管理员通知（通知1 -> 通知2 降级在 adminNotify 内部）
+        if (errors.length) {
+          await notify.adminNotify(errors).catch(e => console.error('adminNotify 自身出错', e));
+        }
+
+        return callback();
       } catch (e) {
         console.error(e)
         console.info(e.stack)
-        console.info(`接收处理新邮件失败2: ${e}, err.stack: ${e.stack}`)
-        notify.push(`接收处理新邮件失败2: ${e}, err.stack: ${e.stack}`)
-        var e = new Error('Internal Error');
-        e.responseCode = 554;
-        return callback(e);
+        const msg = `接收处理新邮件失败2: ${e}, err.stack: ${e.stack}`
+        console.info(msg)
+        notify.adminNotify([{ step: 'fatal', msg }]).catch(() => {})
+        var e2 = new Error('Internal Error');
+        e2.responseCode = 554;
+        return callback(e2);
       }
     })
   }
@@ -140,3 +160,15 @@ server25.on('error', function (e) {
 server25.listen(25)
 log(`listening via 25 port ...`)
 console.info(`listening via 25 port ...`)
+
+// 全局兜底：避免未捕获异常/拒绝导致进程退出（仅记录，不退出）
+process.on('unhandledRejection', (reason) => {
+  const info = reason && reason.stack ? reason.stack : String(reason);
+  console.error('unhandledRejection:', info);
+  log(`unhandledRejection: ${info}`);
+});
+process.on('uncaughtException', (err) => {
+  const info = err && err.stack ? err.stack : String(err);
+  console.error('uncaughtException:', info);
+  log(`uncaughtException: ${info}`);
+});
